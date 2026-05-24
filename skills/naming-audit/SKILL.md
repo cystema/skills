@@ -5,100 +5,87 @@ description: Audit names across a codebase as one concern — flag drift, lies, 
 
 # Naming Audit
 
-Names are the highest-bandwidth thing in code. A truthful name means the reader never opens the body; a lying or under-describing name forces them in every time. This skill reviews **names as a category** across the whole target — file, module, or codebase — and reports drift, lies, and weak descriptions.
+Names are the highest-bandwidth thing in code. A truthful name means the reader never opens the body; a lying or under-describing name forces them in every time. This skill audits **names as a category** across the target and reports drift, lies, and weak descriptions.
 
-This skill **diagnoses and reports; it does not rename.** It produces findings a human (or an agent acting for them) can read, trust, and apply.
-
-A name isn't a label — it's a contract. The audit asks: does each name tell the truth about what the thing means, does it, and returns? And across the codebase: does the same idea wear the same name everywhere?
+**Diagnoses and reports; does not rename.**
 
 ## The vocabulary
 
-Use these terms in every finding. Don't drift into "bad name" or "unclear" — vague, no actionable shape.
+Use these in every finding:
 
-- **Lies** — the name promises one thing, the code does another. `getUser` that also mutates state. `validate` that throws. `isReady` that triggers initialization.
-- **Under-describes** — the name is technically true but tells the reader less than the code does. `check()` that returns a value. `process` for a specific transformation. `handle` for anything event-shaped.
-- **Shape-named** — the name describes the value's *type* or *container*, not its *meaning*. `userArray`, `dataMap`, `responseObject`. Machine-generated code leans on these.
-- **Drift** — same operation, different verbs in different places: `fetch` here, `load` there, `get` over there, `retrieve` in a fourth. Or same word for different operations: `update` meaning four unrelated things.
-- **Altitude mismatch** — the name lives at the wrong level of abstraction for its caller. A domain-layer function named `incrementCounter` when it really `recordPurchase`s. An infra-layer thing named in business terms.
-- **Domain vs. implementation** — the name reflects how the code is built (`userArray`, `tokenString`) instead of what it means in the product (`pendingInvites`, `bearerToken`).
+- **Lies** — name promises one thing, code does another. `getUser` that mutates. `isReady` that initializes.
+- **Under-describes** — technically true, weaker than the code. `check()` that returns. `handle`/`process`/`do` for anything.
+- **Shape-named** — describes type/container, not meaning. `userArray`, `dataMap`, `responseObject`.
+- **Drift** — same operation, different verbs across the codebase (`fetch`/`load`/`get`). Or same verb for different operations.
+- **Domain vs. implementation** — name reflects how built (`tokenString`) instead of what it means (`bearerToken`).
 
 ## The one test that matters
 
-> **Read the name without opening the body. Can you predict what the function/value does, returns, and side-effects? If yes, the name earns its place. If you'd guess wrong, or have to open the body to know, the name is the bug.**
-
-Everything below explains *why* a name passes or fails that test.
+> **Read the name without opening the body. Can you predict what it does, returns, and side-effects? If you'd guess wrong, the name is the bug.**
 
 ## The audit order (do not reorder)
 
-Sequence matters. Drift across the codebase outranks any single ugly name — fixing local names while leaving inconsistent verbs in place is polishing the surface of a deeper problem.
+Drift across the codebase outranks any single ugly name. Fix conventions before polishing locals.
 
 ### 1. Survey the verbs
 
-Before reading any single name carefully, list every verb used for create / read / update / delete / fetch-from-remote / persist / transform. Group by operation, not by location. Drift jumps out the moment you see `fetchUser`, `loadUser`, `getUser`, `retrieveUser` next to each other. Decide the canonical verb per operation; flag every deviation.
+Before reading any single name, list every verb used per operation. Group by operation, not by location. Drift jumps out when `fetchUser`/`loadUser`/`getUser`/`retrieveUser` sit side by side. Pick the canonical verb per operation; flag deviations.
 
-Common drift axes to check explicitly:
-- `fetch` / `load` / `get` / `retrieve` / `read` for read-from-source
-- `save` / `store` / `persist` / `write` / `commit` for write-to-source
-- `make` / `create` / `build` / `new` / `construct` for instantiation
-- `delete` / `remove` / `destroy` / `purge` / `clear` for removal
-- `update` / `patch` / `modify` / `set` / `apply` for in-place change
-- `validate` / `check` / `verify` / `ensure` / `assert` for predicates-with-side-effect
+Common drift axes — check explicitly:
+- read-from-source: `fetch` / `load` / `get` / `retrieve` / `read`
+- write-to-source: `save` / `store` / `persist` / `write` / `commit`
+- instantiate: `make` / `create` / `build` / `new`
+- remove: `delete` / `remove` / `destroy` / `purge`
+- mutate: `update` / `patch` / `modify` / `set`
+- predicate-with-effect: `validate` / `check` / `verify` / `ensure`
 - `handle` / `process` / `do` / `run` — almost always under-describes; flag wholesale
 
-### 2. Check the nouns against the domain
+### 2. Check nouns against the domain
 
-Open the project's domain vocabulary (CONTEXT.md, glossary, ADRs, or the product surface itself). Compare to the nouns in the code. Mismatches:
-
-- Code says `account`, product says `workspace`. Pick one, flag the other.
-- Code uses an obsolete name from a renamed feature. Thank it, flag for migration.
-- Code invents a noun the domain doesn't have (`manager`, `helper`, `wrapper`, `service` with no concrete referent). Flag — either there's a real concept hiding inside, or the abstraction itself doesn't earn its place.
+Open CONTEXT.md, glossary, ADRs, or the product surface. Compare to nouns in code. Mismatches:
+- Code says `account`, product says `workspace` — pick one.
+- Obsolete names from renamed features — flag for migration.
+- Invented nouns the domain doesn't have (`Manager`, `Helper`, `Service` with no concrete referent) — either a real concept hides inside, or the abstraction doesn't earn its place.
 
 ### 3. Flag lies
 
-A lying name is worse than an ugly one — ugly slows the reader, lying actively misleads. For each lie, capture what the name promises vs what the code actually does. Categories:
+Lies actively mislead; worse than ugly. For each, capture promise vs delivery:
 
 - **Side-effect lies.** `getX` that writes. `isX` that mutates. Pure-looking name with hidden I/O.
-- **Return lies.** `check` that returns nothing useful (under-describes) or returns something surprising. `validate` that returns the parsed value instead of just a bool.
-- **Scope lies.** Function named for a narrow operation that does three more things. `sendEmail` that also logs an event and updates a counter — three commits in one name.
-- **Tense / mood lies.** `isExpired` that triggers expiration. `willRetry` that retries immediately. Predicates must be pure-read.
+- **Return lies.** `check` that returns nothing useful. `validate` that returns the parsed value instead of bool.
+- **Scope lies.** `sendEmail` that also logs and increments a counter — three commits in one name.
+- **Tense / mood lies.** `isExpired` that triggers expiration. `willRetry` that retries now. Predicates must be pure-read.
 
 ### 4. Flag under-description and shape-naming
 
-For each name that's technically true but weak, propose a stronger one in the project's domain vocabulary.
+Propose a stronger domain name for each:
 
-- `data`, `result`, `value`, `item`, `thing`, `obj` — never earns its place at the variable level (function-internal short-lived loop vars excepted; flag everything else).
-- `userArray`, `tokenMap`, `responseObject` — strip the type, name the meaning: `users` → `pendingInvites`, `tokenMap` → `tokensBySession`.
-- `handleClick`, `handleSubmit`, `handleChange` — passable for trivial delegation, but flag any `handle*` whose body is more than a few lines: there's a real verb hiding inside.
-- `Manager`, `Helper`, `Util`, `Service` suffixes — flag and ask what concrete responsibility the class actually owns. Often two responsibilities masquerading as one.
+- `data`, `result`, `value`, `item`, `thing`, `obj` — never earns its place outside short loop vars.
+- `userArray` → `pendingInvites`. Strip the type, name the meaning.
+- `handle*` whose body is more than a few lines — real verb hiding inside.
+- `Manager` / `Helper` / `Util` / `Service` — ask what concrete responsibility lives there. Often two responsibilities masquerading as one.
 
-### 5. Check predicates and booleans
+### 5. Predicates and booleans
 
-Booleans and predicates have their own rules — call sites read as sentences only if the names are shaped right.
-
-- Predicates read as questions or assertions: `isExpired`, `hasAccess`, `canPublish`, `shouldRetry`. Not `expired` alone (ambiguous with verb), not `accessCheck` (noun phrase, reads wrong at call site).
-- Negation: prefer `isVisible` over `isNotHidden`. Avoid double negatives at call sites.
-- Boolean flags as function params are smells; if you must name one, name it for the *true* meaning (`force: true`, not `safeMode: false`).
+Call sites should read as sentences:
+- Predicates as questions or assertions: `isExpired`, `hasAccess`, `canPublish`, `shouldRetry`.
+- Prefer `isVisible` over `isNotHidden`. Avoid double negatives.
+- Boolean params are smells; if you must name one, name it for the *true* meaning (`force: true`, not `safeMode: false`).
 
 ### 6. Check the boring places
 
-Drift hides in places no one re-reads:
-
-- File and directory names: same concern split across `utils/auth.ts` and `helpers/authentication.ts`?
-- Test names: do they describe behavior (`returns null when user not found`) or just restate the function name (`testGetUser`)?
-- Commit message / PR title nouns: do they match the code's vocabulary?
-- Error messages and log lines — the user-facing names. If the code says `invitation` but the error says `request`, the user pays for the drift.
+Drift hides where no one re-reads:
+- File/dir names: same concern in `utils/auth.ts` and `helpers/authentication.ts`?
+- Test names: behavior (`returns null when user not found`) or restated symbol (`testGetUser`)?
+- Error messages and log lines — if code says `invitation` and the error says `request`, the user pays for the drift.
 
 ## Output
 
-Always a **report** — ranked findings, never renames. Even if the user says "fix the names," read it as "tell me what to rename," not "rename." Renaming is a separate step they can ask for after reading the findings.
+Always a **report** — ranked findings, never renames.
 
-Rank by leverage:
-- Drift across the codebase first — fixing one site doesn't help; fixing the convention does.
-- Lies second — they actively mislead.
-- Domain mismatches third — they widen the gap between code and product.
-- Under-description and shape-naming last — local, cheap, but high volume.
+Rank: drift (codebase-wide) → lies (mislead) → domain mismatches → under-description (local, cheap, high volume).
 
-For each finding, give: location(s), current name, what it promises vs delivers (or what it drifts with), proposed name, one-line payoff.
+For each finding: location(s), current name, promise vs delivery (or drift partners), proposed name, one-line payoff.
 
 ### Report structure
 
@@ -108,28 +95,26 @@ For each finding, give: location(s), current name, what it promises vs delivers 
 **Verdict:** <one sentence — does the codebase's vocabulary tell the truth?>
 
 ## What's named well ✨
-<What's genuinely good and why. Always include — names worth preserving and using
-as the convention for the rest.>
+<Names worth preserving and using as the convention.>
 
 ## Drift across the codebase 🌀
-<Ranked. For each operation: the verbs/nouns in use, where each appears,
-the canonical choice, sites to migrate. Group by operation, not by file.>
+<Ranked by operation. For each: verbs/nouns in use, where each appears,
+canonical choice, sites to migrate.>
 
 ## Lies 🚨
-<Ranked. For each: name, what it promises, what it does, location, proposed
-name OR proposed behavior change (sometimes the code is wrong, not the name).>
+<Ranked. For each: name, what it promises, what it does, location,
+proposed name (or proposed behavior change — sometimes the code is wrong).>
 
 ## Domain mismatches
-<Ranked. For each: code name, domain name, where each lives, why they diverged
-if known, proposed unification.>
+<Ranked. For each: code name, domain name, where each lives, proposed unification.>
 
 ## Under-described / shape-named
-<Ranked or grouped. Current → proposed, with one-line rationale. Group large
-classes of the same fix (e.g., "12 variables named `data` — see table").>
+<Ranked or grouped. Current → proposed, one-line rationale. Group large
+classes (e.g., "12 vars named `data` — see table").>
 
 ## Where to start
-<Short numbered path: drift fixes first (one PR per operation), then lies
-(highest-traffic first), then domain alignment, then local cleanup.>
+<Numbered path: drift first (one PR per operation) → lies (highest-traffic first)
+→ domain alignment → local cleanup.>
 ```
 
-Tie every finding to a real location and a concrete proposed name. The reader should be able to act on each finding without re-deriving the rationale. Be specific and kind: a good naming audit makes the codebase read like prose to whoever opens it next.
+Tie every finding to a real location and a concrete proposed name.
