@@ -5,181 +5,157 @@ description: Map what breaks if a function, module, migration, config change, or
 
 # Blast Radius
 
-Every change has a radius. Most engineering pain comes from a change whose true radius was larger than the author thought. This skill **maps the radius before the change ships** — every direct caller, every hidden coupling, every assumption that depends on the current behavior, and every place that won't easily revert if the change turns out wrong.
+Every change has a radius. Most engineering pain comes from a change whose true radius was larger than the author thought. This skill **maps the radius before the change ships** — direct callers, hidden coupling, broken invariants, and irreversibility.
 
-This skill **diagnoses and reports; it does not change code.** It produces a map and a risk-ranked impact report a human (or an agent acting for them) can read before deciding *how* to ship the change — atomically, behind a flag, in stages, or not at all.
+A change is "small" only if its blast radius is small.
 
-A change is "small" only if its blast radius is small. Audit the radius before believing the change is small.
+**Diagnoses and reports; does not change code.**
 
 ## The vocabulary
 
-Use these terms in every finding. Don't drift into "this affects a lot of code" — vague.
-
-- **Direct surface** — every callsite, importer, subscriber, or consumer that names the thing being changed by symbol. Greppable.
-- **Indirect surface** — code that depends on the thing's *behavior* without naming the symbol: serialized payloads, database columns shaped by it, log formats parsed downstream, contracts with other services, cached values, generated code, schemas.
-- **Hidden coupling** — dependents you can't grep for: dynamic dispatch, reflection, string-keyed lookups, framework auto-wiring, config-driven references, downstream consumers in another repo, dashboards/queries that key on the field, runbooks that mention it.
-- **Invariant** — something callers assume that the change might break: ordering, idempotency, sort stability, default values, error types thrown, performance characteristics, atomicity.
-- **Boundary** — a place the change crosses (process, service, repo, deployment unit, persisted-data layer, public API, cache, queue). Each boundary multiplies risk because the two sides deploy independently.
-- **Reversibility** — cost to undo if wrong, measured in minutes / hours / days / weeks. Schema deletions and serialized-format breaks are weeks; flag flips are minutes.
-- **Recovery posture** — what restores the system if the change is bad: revert, flag-off, migration rollback, manual cleanup, data backfill, restore-from-backup, public apology.
+- **Direct surface** — callsites, importers, subscribers, consumers that name the symbol. Greppable.
+- **Indirect surface** — code that depends on *behavior* without naming the symbol: serialized payloads, DB columns, log formats, contracts with other services, cached values, generated code.
+- **Hidden coupling** — dependents you can't grep for: dynamic dispatch, reflection, string-keyed lookups, framework auto-wiring, config references, downstream consumers in other repos, dashboards/runbooks.
+- **Invariant** — something callers assume that the change might break: ordering, idempotency, defaults, error types, performance, atomicity.
+- **Boundary** — place the change crosses (process, service, repo, deploy unit, persisted-data layer, public API, cache, queue). Each multiplies risk because the two sides deploy independently.
+- **Reversibility** — cost to undo if wrong: minutes / hours / days / weeks. Schema deletions and serialized-format breaks are weeks; flag flips are minutes.
 
 ## The one test that matters
 
-> **Imagine you ship this change at 17:00 on Friday. At 03:00 Saturday, the worst plausible thing has happened. What is the symptom, who notices, what restores the system, and how long does it take? If the answer is "revert and we're fine within minutes," the radius is small. If it involves backfills, schema rollbacks, coordinating with other teams, or apologizing to users, the radius is large — regardless of how small the diff looks.**
-
-Everything below explains how to derive that answer concretely.
+> **Ship the change at 17:00 Friday. At 03:00 Saturday, the worst plausible thing happened. What's the symptom, who notices, what restores the system, how long does it take? If the answer is "revert and we're fine within minutes," radius is small. If it involves backfills, schema rollbacks, coordinating with other teams, or apologizing to users, radius is large — regardless of how small the diff looks.**
 
 ## The audit order (do not reorder)
 
-Map the surface before judging risk. A risk verdict on a partial surface is worse than no verdict — it gives false confidence. Direct surface first (cheap), then indirect (harder), then hidden (requires guessing), then invariants (requires thinking), then reversibility (requires honesty).
+Map the surface before judging risk. A risk verdict on a partial surface gives false confidence.
 
 ### 1. Map the direct surface
 
-Find everything that names the symbol. Be thorough; one missed callsite is a production bug.
+Find everything that names the symbol. One missed callsite = production bug.
 
-- All callsites of the function/method.
-- All imports of the module.
-- All references to the type / interface / trait.
-- All subscribers / handlers / consumers of the event or topic.
-- All routes / endpoints that hit this code.
-- All test files that exercise it (counts as surface — they tell you what behavior is pinned).
+- Callsites of the function/method.
+- Imports of the module.
+- References to the type/interface/trait.
+- Subscribers/handlers/consumers of the event/topic.
+- Routes/endpoints that hit this code.
+- Tests that exercise it (surface — they pin behavior).
 
-Tools: grep / ripgrep / IDE find-usages / language server / `git grep` across the repo. Across repos: search the org. For services: search consumer repos and gateway configs.
+Tools: grep / ripgrep / find-usages / language server. Across repos: search the org. Services: search consumer repos and gateway configs.
 
-Report: count, list, and group by purpose (test vs. production vs. tooling).
+Report: count, list, group by purpose (test vs production vs tooling).
 
 ### 2. Map the indirect surface
 
-These are dependents that don't name the symbol but depend on its behavior:
+Dependents that don't name the symbol but depend on its behavior:
 
-- **Persisted shape.** Does this code write to a database column, file format, cache key, queue message, log line? Anyone who reads that shape is a dependent — including humans reading logs, ETL jobs, downstream analytics, BI dashboards.
-- **Wire shape.** Public API responses, internal RPC payloads, webhook bodies. Each consumer is a dependent; consumers in other orgs/teams are dependents you can't see.
-- **Configuration surface.** Env vars, feature flags, runtime config files. Anything that reads these is a dependent.
-- **Generated artifacts.** Code generated from a schema, client SDKs, API docs. Regenerate and re-publish, or downstream breaks.
-- **Filesystem / process contracts.** PID files, lock files, temp dirs, signals. Operators are dependents.
-
-Report: which categories apply, which specific consumers per category, which you couldn't enumerate.
+- **Persisted shape.** DB column, file format, cache key, queue message, log line. Anyone who reads that shape is a dependent — including humans reading logs, ETL jobs, BI dashboards.
+- **Wire shape.** API responses, RPC payloads, webhook bodies. External consumers are dependents you can't see.
+- **Configuration surface.** Env vars, feature flags, runtime config. Anything that reads these.
+- **Generated artifacts.** Schema-generated code, client SDKs, API docs. Regenerate or downstream breaks.
 
 ### 3. Hunt hidden coupling
 
 Things you can't grep for. The dangerous ones:
 
-- **Dynamic dispatch.** Reflection, `getattr`, `__getattribute__`, dynamic imports, registry-pattern lookups by string key. Search for the string form of the symbol, not just the symbol itself.
-- **Framework magic.** ORM hooks, decorators, dependency injection by type, Spring/Nest-style auto-wiring, Django signals, Rails callbacks. The framework wires things you didn't write.
-- **Config-driven references.** YAML/JSON/env that names the thing as a string. The change to code doesn't update the config; deployment finds out.
-- **Cross-repo consumers.** Internal SDK clients, downstream services, sister-team services, public clients. Search the org. If you can't, ask who consumes this surface.
-- **Out-of-band consumers.** Observability dashboards (Grafana panels keyed on a field), alerting rules, runbooks, on-call docs, customer-support macros. Renaming a metric breaks the dashboard silently.
-- **Cached / serialized values.** If the change alters the shape of something currently cached or serialized, in-flight cached values become poison after deploy. Includes user-side caches, CDN, browser localStorage.
-- **External monitoring of side effects.** Webhooks, email/SMS templates, exported events to data warehouse, audit logs scraped by compliance tooling.
+- **Dynamic dispatch.** Reflection, `getattr`, dynamic imports, registry-pattern lookups by string key. Search the string form, not just the symbol.
+- **Framework magic.** ORM hooks, decorators, DI by type, Spring/Nest auto-wiring, Django signals, Rails callbacks.
+- **Config-driven references.** YAML/JSON/env naming the thing as a string. Code change doesn't update config; deployment finds out.
+- **Cross-repo consumers.** Internal SDK clients, downstream services, public clients. If you can't search, ask.
+- **Out-of-band consumers.** Grafana panels, alerting rules, runbooks, support macros. Renaming a metric breaks the dashboard silently.
+- **Cached/serialized values.** If the shape changes, in-flight cached values become poison after deploy. Includes browser localStorage, CDN.
 
-Report: each suspected hidden coupling, how you'd verify it exists, and what the symptom of breakage looks like.
+For each suspected coupling: how to verify, what breakage looks like.
 
-### 4. List the invariants the change might break
+### 4. List invariants the change might break
 
-A change can preserve every callsite and still break callers — by breaking the invariants they assume. For each invariant, ask: does the change preserve it? If not, who depends on it?
+A change can preserve every callsite and still break callers — by breaking assumptions:
 
-- **Ordering and stability.** Sort order, iteration order, event order, idempotency of retries.
-- **Type / shape.** Nullable becoming non-nullable (or vice versa). Optional fields becoming required. Wider type accepted, narrower type returned.
-- **Error contract.** Same error type? Same error codes? Same conditions for throwing? A code path that previously threw and now returns `null` silently changes every catch block.
-- **Performance.** Was this called in a hot loop? Did it amortize to O(1) and now amortizes to O(n)? Does it now do I/O it didn't before? Does it now block where it used to be async?
-- **Concurrency / atomicity.** Was this safe to call concurrently? Did it hold a lock? Does the new version need ordering guarantees?
-- **Defaults.** Default arg values, default config values, default SQL column values. Changing a default silently changes behavior for every caller that didn't override.
-- **Side effects.** Did this previously read-only thing now write? Did this previously synchronous thing now schedule? Did this previously local thing now hit the network?
-
-Report: invariants that change, how callers depend on each, how breakage would manifest.
+- **Ordering / stability.** Sort order, iteration order, event order, retry idempotency.
+- **Type / shape.** Nullable ↔ non-nullable. Optional becoming required.
+- **Error contract.** Same error type? Same conditions? A code path that previously threw and now returns `null` silently breaks every catch block.
+- **Performance.** Hot loop? O(1) → O(n)? Now does I/O? Now blocks where it was async?
+- **Concurrency / atomicity.** Was it safe concurrently? Did it hold a lock?
+- **Defaults.** Default args, default config values, default SQL column values. Silently changes behavior for callers that didn't override.
+- **Side effects.** Previously read-only thing now writes? Previously local thing now hits the network?
 
 ### 5. Map boundaries crossed
 
-Every boundary multiplies risk because the two sides deploy independently and may run mixed versions for some window.
+Each boundary multiplies risk because the two sides deploy independently and may run mixed versions for some window.
 
-For each boundary the change crosses, ask: can the two sides be deployed in either order? If not, you have a deployment-ordering hazard and need a multi-step rollout (expand → migrate → contract, or similar).
+For each boundary: can the two sides deploy in either order? If not, you have a deployment-ordering hazard and need expand → migrate → contract.
 
-- Process boundary (worker vs API).
-- Service boundary (microservice ↔ microservice).
-- Repo boundary (library ↔ consumer).
-- Deploy-unit boundary (frontend bundle ↔ backend).
-- Persisted-data boundary (writer ↔ data ↔ reader, where "data" persists across deploys).
-- Cache boundary (writer puts shape A, reader expects shape B during deploy window).
-- Public API boundary (you deploy, external clients update on their schedule — i.e., never).
+Boundaries to check: process, service, repo, deploy-unit (frontend ↔ backend), persisted-data (writer ↔ data ↔ reader), cache, public API.
 
-Report: which boundaries are crossed, deployment-ordering constraints, mixed-version compatibility for the window when both run.
+### 6. Score reversibility
 
-### 6. Score reversibility and recovery posture
+- **Minutes** — flag flip, config rollback, code revert with no persistent side effects.
+- **Hours** — code revert + cache invalidation, rolling restart, republish generated artifact.
+- **Days** — data backfill, reverse schema migration, coordinated multi-service deploy.
+- **Weeks / never** — destroyed data, public API breakage seen by external clients, secrets rotated, unreachable consumers of changed serialized format.
 
-For each part of the change, score what it takes to undo if production is unhappy:
-
-- **Trivially reversible** (minutes) — flag flip, config rollback, code revert with no persistent side effects.
-- **Reversible with effort** (hours) — code revert plus cache invalidation, or rolling restart, or republishing a generated artifact.
-- **Reversible with risk** (days) — data backfill, schema migration in reverse, coordinated multi-service deploy.
-- **Effectively one-way** (weeks / never) — destroyed data, public API breakage seen by external clients, serialized format consumers can't be reached, secrets rotated.
-
-A small diff with one-way consequences deserves more scrutiny than a large diff with one-button revert. Highlight the one-way doors.
+A small diff with one-way consequences deserves more scrutiny than a large diff with one-button revert. **Highlight one-way doors explicitly.**
 
 ### 7. Construct the 3am scenario
 
-Synthesize a concrete failure narrative for the worst plausible outcome. Be specific:
+Synthesize a concrete failure narrative. Be specific:
+- First symptom and where it appears (alert, customer report, silent degradation noticed days later).
+- Who's paged, with what context.
+- Immediate mitigation (revert, flag-off, scale-out).
+- Full recovery (data fixup, customer comms, post-incident review).
+- Time to mitigation and full recovery.
 
-- What's the first symptom and where does it appear (alert / customer report / silent degradation noticed days later)?
-- Who's paged, with what context?
-- What's the immediate mitigation (revert, flag-off, scale-out)?
-- What's the full recovery (any data fixup, customer comms, post-incident review trigger)?
-- Estimated time to mitigation and to full recovery.
-
-If you can't construct this scenario, the audit isn't done. The act of writing it forces the missing pieces of the radius into view.
+If you can't construct this scenario, the audit isn't done.
 
 ## Output
 
-Always a **report** — ranked findings, never edits. Even if the user says "make this safe to ship," read it as "tell me what would make this safe to ship," not "do it." The decision is theirs.
+Always a **report** — ranked findings, never edits.
 
 Rank by what shapes the rollout plan:
 
-1. **Hidden / out-of-org dependents** — you can't fix what you can't see; surface them first so the author can decide whether to coordinate.
-2. **One-way doors** — irreversibility is the dominant risk factor; flag before discussing anything else.
-3. **Boundary / deployment-ordering hazards** — these dictate rollout shape (atomic vs. expand-migrate-contract).
-4. **Broken invariants** — drive whether callers need updating in lockstep.
-5. **Direct surface volume** — drives whether the change is a one-PR or a campaign.
-6. **Defensive noise / dead surface** — opportunities to *shrink* the radius before shipping (e.g., delete dead callsites first, narrow the public API, then do the real change).
+1. **Hidden / out-of-org dependents** — can't fix what you can't see.
+2. **One-way doors** — irreversibility is the dominant risk factor.
+3. **Boundary / deployment-ordering hazards** — dictate rollout shape.
+4. **Broken invariants** — drive whether callers need lockstep updates.
+5. **Direct surface volume** — drives one-PR vs campaign.
+6. **Dead surface to shrink first** — delete dead callsites before the real change.
 
 ### Report structure
 
 ```
 # Blast radius — <change>
 
-**Verdict:** <one sentence — small / medium / large radius, and the dominant risk factor.>
+**Verdict:** <one sentence — small/medium/large radius, dominant risk factor.>
 
 ## The 3am scenario 🌙
-<Concrete failure narrative for the worst plausible outcome: symptom, who pages,
-mitigation, full recovery, time-to-recovery. Lead with this — it grounds everything below.>
+<Concrete failure narrative: symptom, who pages, mitigation, full recovery,
+time-to-recovery. Leads — grounds everything below.>
 
 ## Direct surface
-<Count and grouped list of callsites/importers/consumers. Distinguish test from
-production from tooling. Link or path-line every site.>
+<Count and grouped list. Distinguish test/production/tooling. Path-line every site.>
 
 ## Indirect surface
 <Persisted shapes, wire shapes, config, generated artifacts. For each: who reads
-this shape, what breaks if the shape changes.>
+this shape, what breaks if it changes.>
 
 ## Hidden coupling ⚠
-<Ranked. For each suspected dependency you can't grep for: how to verify it,
-symptom of breakage. Out-of-org consumers go first.>
+<Ranked. For each suspected dependency: how to verify, breakage symptom.
+Out-of-org consumers first.>
 
 ## Broken invariants
-<Ranked. For each invariant the change alters: what callers assume, how breakage
-manifests, which callers depend on it.>
+<Ranked. For each: what callers assume, how breakage manifests, which callers
+depend on it.>
 
 ## Boundaries crossed
-<For each boundary: deployment-ordering constraint, mixed-version compatibility
-during the deploy window, required rollout shape (atomic vs phased).>
+<For each: deployment-ordering constraint, mixed-version compatibility during
+deploy window, required rollout shape (atomic vs phased).>
 
 ## Reversibility map
-<For each part of the change: reversibility tier (minutes/hours/days/never),
-what recovery requires. Highlight one-way doors explicitly.>
+<For each part: tier (minutes/hours/days/never), what recovery requires.
+Highlight one-way doors.>
 
 ## Recommended rollout
-<Numbered. The shape of the safe rollout that falls out of the findings: e.g.,
-"1. Delete dead callsites X, Y, Z (shrinks radius). 2. Add new field alongside
-old (expand). 3. Migrate readers behind flag. 4. Remove old field (contract)."
-Or "ship atomically — radius is small." Be specific.>
+<Numbered. Shape that falls out of the findings: e.g., "1. Delete dead callsites
+X, Y (shrinks radius). 2. Add new field alongside old. 3. Migrate readers behind
+flag. 4. Remove old field." Or "ship atomically — radius small." Be specific.>
 ```
 
-Tie every finding to a real location or a concrete dependent. The report's job is to make the author choose a rollout shape that matches the actual radius — atomically when safe, staged when not. A small diff with a large radius is the most dangerous thing a codebase ships; this skill exists to make that mismatch visible before the change goes out.
+Tie every finding to a real location or a concrete dependent. The report's job is to make the author choose a rollout shape that matches the actual radius. A small diff with a large radius is the most dangerous thing a codebase ships.
