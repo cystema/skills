@@ -1,0 +1,13 @@
+{
+  "name": "skills",
+  "owner": {
+    "name": "cystema"
+  },
+  "plugins": [
+    {
+      "name": "cystema",
+      "source": "./",
+      "description": "Personal skills collection"
+    }
+  ]
+}
