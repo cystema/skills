@@ -1,0 +1,4 @@
+interface:
+  display_name: "Module Design"
+  short_description: "Review module depth, cohesion, and boundaries"
+  default_prompt: "Use $module-design to review the boundaries and depth of this module."

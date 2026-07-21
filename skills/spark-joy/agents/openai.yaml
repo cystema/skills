@@ -1,0 +1,4 @@
+interface:
+  display_name: "Spark Joy"
+  short_description: "Review code for clarity, depth, and joy"
+  default_prompt: "Use $spark-joy to review whether this code is clear, deep, and joyful."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reliability Audit"
+  short_description: "Audit concurrency, retry, and timeout risks"
+  default_prompt: "Use $reliability-audit to review concurrency, retry, and timeout risks."

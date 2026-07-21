@@ -1,0 +1,4 @@
+interface:
+  display_name: "Error Budget"
+  short_description: "Audit failure paths and swallowed errors"
+  default_prompt: "Use $error-budget to audit failure paths and swallowed errors in this code."

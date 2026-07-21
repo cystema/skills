@@ -1,0 +1,4 @@
+interface:
+  display_name: "Observability Audit"
+  short_description: "Audit logs, metrics, traces, and signal gaps"
+  default_prompt: "Use $observability-audit to review telemetry coverage in this code."

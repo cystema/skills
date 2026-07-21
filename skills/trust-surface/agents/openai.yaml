@@ -1,0 +1,4 @@
+interface:
+  display_name: "Trust Surface"
+  short_description: "Audit input trust and authorization boundaries"
+  default_prompt: "Use $trust-surface to audit input trust and authorization boundaries."
