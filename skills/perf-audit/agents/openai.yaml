@@ -1,0 +1,4 @@
+interface:
+  display_name: "Performance Audit"
+  short_description: "Find structural performance and scaling risks"
+  default_prompt: "Use $perf-audit to find structural performance risks in this code."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Naming Audit"
+  short_description: "Find misleading, weak, and inconsistent names"
+  default_prompt: "Use $naming-audit to find misleading or inconsistent names in this code."

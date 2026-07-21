@@ -1,0 +1,4 @@
+interface:
+  display_name: "Learn"
+  short_description: "Learn any topic at one of five depths"
+  default_prompt: "Use $learn at level 1 to explain a topic in this workspace."

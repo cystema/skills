@@ -2,11 +2,15 @@
 
 [![skills.sh](https://skills.sh/b/cystema/skills)](https://skills.sh/cystema/skills)
 
-Diagnostic Claude Code skills. Each produces a ranked report — no edits.
+Skills for learning and focused code diagnosis.
 
 ## Skills
 
-Each shares one shape: a vocabulary, a single "test that matters", ordered checks, and a ranked report.
+**Learning**
+
+- **[learn](skills/learn)** — Learn a topic or understand workspace code at a chosen depth, from first encounter (1) to expert inquiry (5).
+
+The diagnostic skills share one shape: a vocabulary, a single "test that matters", ordered checks, and a ranked report with no edits.
 
 **Review & readability**
 - **[spark-joy](skills/spark-joy)** — KonMari felt-review. Keep only what earns its place; flag shallow, untestable, low-glance-value code.

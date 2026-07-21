@@ -1,0 +1,4 @@
+interface:
+  display_name: "State Shape"
+  short_description: "Find data models that permit invalid states"
+  default_prompt: "Use $state-shape to review whether this data model permits invalid states."
